@@ -1,0 +1,34 @@
+# Build outputs
+/target/
+
+# Local runtime data
+techsync.db
+*.db
+
+# Logs
+*.log
+/logs/
+
+# IDE/editor metadata
+/.vscode/
+/.idea/
+*.iml
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Terraform local state artifacts (if Terraform is added later)
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

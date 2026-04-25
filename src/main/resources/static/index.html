@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TechSync | Work Order Control Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="bg-shape bg-shape-one"></div>
+  <div class="bg-shape bg-shape-two"></div>
+
+  <main class="app-shell">
+    <header class="hero reveal">
+      <div>
+        <p class="kicker">Field Operations Platform</p>
+        <h1>TechSync Work Order Control Center</h1>
+        <p class="subtitle">Offline-first execution with fast local filtering, queued sync, and one-click recovery tools.</p>
+      </div>
+      <div class="metrics">
+        <article class="metric-card">
+          <span>Total Work Orders</span>
+          <strong id="metric-total">0</strong>
+        </article>
+        <article class="metric-card">
+          <span>Pending Sync</span>
+          <strong id="metric-pending">0</strong>
+        </article>
+      </div>
+    </header>
+
+    <section class="panel reveal delay-1">
+      <div class="panel-head">
+        <h2>Filters</h2>
+      </div>
+      <div class="filters-row">
+        <label>
+          <span>Status</span>
+          <select id="filter-status">
+            <option value="">All</option>
+            <option value="OPEN">OPEN</option>
+            <option value="IN_PROGRESS">IN_PROGRESS</option>
+            <option value="COMPLETED">COMPLETED</option>
+          </select>
+        </label>
+        <label>
+          <span>Priority</span>
+          <select id="filter-priority">
+            <option value="">All</option>
+            <option value="LOW">LOW</option>
+            <option value="MEDIUM">MEDIUM</option>
+            <option value="HIGH">HIGH</option>
+          </select>
+        </label>
+        <button id="apply-filters" class="btn ghost">Apply</button>
+        <button id="clear-filters" class="btn ghost">Clear</button>
+      </div>
+    </section>
+
+    <section class="layout reveal delay-2">
+      <div class="panel table-panel">
+        <div class="panel-head">
+          <h2>Work Orders</h2>
+          <span id="table-count">0 items</span>
+        </div>
+        <div class="table-wrap">
+          <table id="orders-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Title</th>
+                <th>Asset</th>
+                <th>Status</th>
+                <th>Priority</th>
+                <th>Assigned To</th>
+                <th>Sync</th>
+                <th>Last Synced</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <aside class="panel side-panel">
+        <div class="panel-head">
+          <h2>Editor</h2>
+        </div>
+
+        <form id="work-order-form" class="form-grid">
+          <label>
+            <span>ID (auto on new)</span>
+            <input id="wo-id" type="number" min="1" placeholder="Auto generated">
+          </label>
+          <label>
+            <span>Title</span>
+            <input id="wo-title" type="text" maxlength="200" required>
+          </label>
+          <label>
+            <span>Asset ID</span>
+            <input id="wo-asset" type="text" maxlength="100" value="ASSET-">
+          </label>
+          <label>
+            <span>Status</span>
+            <select id="wo-status">
+              <option value="OPEN">OPEN</option>
+              <option value="IN_PROGRESS">IN_PROGRESS</option>
+              <option value="COMPLETED">COMPLETED</option>
+            </select>
+          </label>
+          <label>
+            <span>Priority</span>
+            <select id="wo-priority">
+              <option value="LOW">LOW</option>
+              <option value="MEDIUM" selected>MEDIUM</option>
+              <option value="HIGH">HIGH</option>
+            </select>
+          </label>
+          <label>
+            <span>Assigned To</span>
+            <input id="wo-assigned" type="text" maxlength="100" value="Tech-1">
+          </label>
+        </form>
+
+        <div class="actions">
+          <button id="new-btn" class="btn ghost">New / Clear</button>
+          <button id="save-btn" class="btn primary">Save</button>
+          <button id="delete-btn" class="btn danger">Delete</button>
+          <button id="fetch-btn" class="btn ghost">Fetch Online</button>
+          <button id="sync-btn" class="btn ghost">Sync Pending</button>
+          <button id="reset-btn" class="btn danger-ghost">Reset Demo Data</button>
+        </div>
+
+        <div class="details" id="details-box">
+          Select a row to view details.
+        </div>
+      </aside>
+    </section>
+
+    <footer class="status-bar reveal delay-3">
+      <span id="status-message">Ready</span>
+    </footer>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

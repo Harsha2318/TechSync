@@ -1,0 +1,8 @@
+target/
+.git/
+.gitignore
+.vscode/
+*.iml
+*.log
+techsync.db
+terraform/
