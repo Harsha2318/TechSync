@@ -37,7 +37,7 @@ Core runtime flow:
 
 ## Tech Stack
 
-- Java 17
+- Java 25
 - Maven
 - Spring Boot 3.3.5
 - SQLite JDBC
@@ -63,7 +63,7 @@ Core runtime flow:
 
 Local development:
 
-- Java 17+
+- Java 25+
 - Maven 3.9+
 - Git
 
