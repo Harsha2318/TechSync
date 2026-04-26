@@ -48,6 +48,7 @@ public class DatabaseHelper {
                 + "status TEXT DEFAULT 'OPEN',"
                 + "priority TEXT,"
                 + "assigned_to TEXT,"
+            + "updated_at INTEGER NOT NULL DEFAULT 0,"
                 + "last_synced TEXT,"
                 + "sync_status TEXT DEFAULT 'synced'"
                 + ");";
@@ -57,6 +58,14 @@ public class DatabaseHelper {
         
         try (Statement stmt = getConnection().createStatement()) {
             stmt.execute(createTableSQL);
+            try {
+                stmt.execute("ALTER TABLE work_orders ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0");
+            } catch (SQLException ex) {
+                // Ignore duplicate-column migration errors to keep startup idempotent.
+                if (!ex.getMessage().toLowerCase().contains("duplicate column")) {
+                    throw ex;
+                }
+            }
             stmt.execute(createIndexSQL);
             System.out.println("✅ Database schema initialized with indexes");
         }
@@ -93,8 +102,10 @@ public class DatabaseHelper {
 
     private static void insertSeedRows() throws SQLException {
         String insertSql = "INSERT INTO work_orders "
-                + "(id, title, asset_id, status, priority, assigned_to, sync_status, last_synced) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))";
+            + "(id, title, asset_id, status, priority, assigned_to, sync_status, updated_at, last_synced) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))";
+
+        long now = System.currentTimeMillis();
 
         String[][] seedRows = {
             {"1001", "Inspect conveyor belt motor", "ASSET-MTR-01", STATUS_OPEN, "HIGH", "Tech-1", SYNCED},
@@ -108,7 +119,8 @@ public class DatabaseHelper {
         };
 
         try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
-            for (String[] row : seedRows) {
+            for (int i = 0; i < seedRows.length; i++) {
+                String[] row = seedRows[i];
                 pstmt.setInt(1, Integer.parseInt(row[0]));
                 pstmt.setString(2, row[1]);
                 pstmt.setString(3, row[2]);
@@ -116,6 +128,7 @@ public class DatabaseHelper {
                 pstmt.setString(5, row[4]);
                 pstmt.setString(6, row[5]);
                 pstmt.setString(7, row[6]);
+                pstmt.setLong(8, now + i);
                 pstmt.addBatch();
             }
             pstmt.executeBatch();

@@ -1,7 +1,14 @@
+const LOCAL_DB_NAME = "techsync-offline-db";
+const LOCAL_DB_VERSION = 1;
+const STORE_WORK_ORDERS = "workOrders";
+const STORE_PENDING_OPS = "pendingOps";
+
 const state = {
   rows: [],
   selectedId: null
 };
+
+let syncInProgress = false;
 
 const elements = {
   metricTotal: document.getElementById("metric-total"),
@@ -20,8 +27,14 @@ const elements = {
   assigned: document.getElementById("wo-assigned")
 };
 
+let dbPromise;
+
 function setStatus(message) {
   elements.statusMessage.textContent = message;
+}
+
+function isOnline() {
+  return navigator.onLine;
 }
 
 async function api(path, options = {}) {
@@ -32,11 +45,10 @@ async function api(path, options = {}) {
 
   if (!response.ok) {
     let message = `Request failed: ${response.status}`;
-    try {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
       const body = await response.json();
       message = body.error || body.detail || message;
-    } catch (_) {
-      // Keep default message when response body is not JSON.
     }
     throw new Error(message);
   }
@@ -66,7 +78,8 @@ function renderDetails() {
     `Status: ${row.status}`,
     `Priority: ${row.priority}`,
     `Assigned To: ${row.assignedTo || "-"}`,
-    `Sync Status: ${row.syncStatus || "-"}`,
+    `Sync Status: ${(row.syncStatus || "-").toUpperCase()}`,
+    `Updated At: ${row.updatedAt || "-"}`,
     `Last Synced: ${row.lastSynced || "-"}`
   ].join("\n");
 }
@@ -113,7 +126,7 @@ function renderTable() {
       <td>${row.status}</td>
       <td>${row.priority}</td>
       <td>${escapeHtml(row.assignedTo || "")}</td>
-      <td>${row.syncStatus || ""}</td>
+      <td>${(row.syncStatus || "").toUpperCase()}</td>
       <td>${row.lastSynced || ""}</td>
     `;
 
@@ -140,24 +153,114 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-async function loadMetrics() {
-  const data = await api("/api/metrics");
-  elements.metricTotal.textContent = data.total;
-  elements.metricPending.textContent = data.pending;
+function openLocalDb() {
+  if (dbPromise) {
+    return dbPromise;
+  }
+
+  dbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(LOCAL_DB_NAME, LOCAL_DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_WORK_ORDERS)) {
+        const store = db.createObjectStore(STORE_WORK_ORDERS, { keyPath: "id" });
+        store.createIndex("status", "status", { unique: false });
+        store.createIndex("priority", "priority", { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_PENDING_OPS)) {
+        db.createObjectStore(STORE_PENDING_OPS, { keyPath: "opId", autoIncrement: true });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Failed to open IndexedDB"));
+  });
+
+  return dbPromise;
+}
+
+async function withStore(storeName, mode, action) {
+  const db = await openLocalDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
+
+    let actionResult;
+    try {
+      actionResult = action(store);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    tx.oncomplete = () => resolve(actionResult);
+    tx.onerror = () => reject(tx.error || new Error("IndexedDB transaction failed"));
+    tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction aborted"));
+  });
+}
+
+async function getAllLocalRows() {
+  return withStore(STORE_WORK_ORDERS, "readonly", (store) => {
+    return requestToPromise(store.getAll());
+  });
+}
+
+async function putLocalRow(row) {
+  return withStore(STORE_WORK_ORDERS, "readwrite", (store) => {
+    store.put(row);
+  });
+}
+
+async function removeLocalRow(id) {
+  return withStore(STORE_WORK_ORDERS, "readwrite", (store) => {
+    store.delete(id);
+  });
+}
+
+async function putManyLocalRows(rows) {
+  return withStore(STORE_WORK_ORDERS, "readwrite", (store) => {
+    rows.forEach((row) => store.put(row));
+  });
+}
+
+async function getPendingOperations() {
+  const rows = await withStore(STORE_PENDING_OPS, "readonly", (store) => {
+    return requestToPromise(store.getAll());
+  });
+  return rows.sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
+}
+
+async function enqueueOperation(operation) {
+  return withStore(STORE_PENDING_OPS, "readwrite", (store) => {
+    store.add(operation);
+  });
+}
+
+async function deletePendingOperation(opId) {
+  return withStore(STORE_PENDING_OPS, "readwrite", (store) => {
+    store.delete(opId);
+  });
+}
+
+function requestToPromise(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("IndexedDB request failed"));
+  });
+}
+
+function applyClientFilters(rows) {
+  return rows.filter((row) => {
+    const statusMatch = !elements.filterStatus.value || row.status === elements.filterStatus.value;
+    const priorityMatch = !elements.filterPriority.value || row.priority === elements.filterPriority.value;
+    return statusMatch && priorityMatch;
+  });
 }
 
 async function loadRows() {
-  const params = new URLSearchParams();
-  if (elements.filterStatus.value) {
-    params.set("status", elements.filterStatus.value);
-  }
-  if (elements.filterPriority.value) {
-    params.set("priority", elements.filterPriority.value);
-  }
-
-  const query = params.toString();
-  const rows = await api(`/api/work-orders${query ? `?${query}` : ""}`);
-  state.rows = rows;
+  const localRows = await getAllLocalRows();
+  state.rows = applyClientFilters(localRows);
 
   if (!state.rows.some((r) => r.id === state.selectedId)) {
     state.selectedId = null;
@@ -172,6 +275,13 @@ async function loadRows() {
   renderDetails();
 }
 
+async function loadMetrics() {
+  const rows = await getAllLocalRows();
+  const pending = rows.filter((row) => (row.syncStatus || "").toLowerCase() === "pending").length;
+  elements.metricTotal.textContent = rows.length;
+  elements.metricPending.textContent = pending;
+}
+
 async function reloadAll(statusText = "Ready") {
   await Promise.all([loadRows(), loadMetrics()]);
   setStatus(statusText);
@@ -184,8 +294,15 @@ function collectPayload() {
     assetId: elements.asset.value,
     status: elements.status.value,
     priority: elements.priority.value,
-    assignedTo: elements.assigned.value
+    assignedTo: elements.assigned.value,
+    updatedAt: Date.now()
   };
+}
+
+async function nextLocalId() {
+  const rows = await getAllLocalRows();
+  const maxId = rows.reduce((max, row) => Math.max(max, Number(row.id) || 0), 1000);
+  return maxId + 1;
 }
 
 async function saveCurrent() {
@@ -194,13 +311,30 @@ async function saveCurrent() {
     throw new Error("Title is required.");
   }
 
-  const saved = await api("/api/work-orders", {
-    method: "POST",
-    body: JSON.stringify(payload)
+  if (!payload.id || payload.id <= 0) {
+    payload.id = await nextLocalId();
+  }
+
+  const localRecord = {
+    ...payload,
+    syncStatus: "pending",
+    lastSynced: null
+  };
+
+  await putLocalRow(localRecord);
+  await enqueueOperation({
+    operation: "UPSERT",
+    id: localRecord.id,
+    updatedAt: localRecord.updatedAt,
+    workOrder: localRecord
   });
 
-  state.selectedId = saved.id;
-  await reloadAll(`Saved work order #${saved.id}`);
+  state.selectedId = localRecord.id;
+  await reloadAll(`Saved locally work order #${localRecord.id}`);
+
+  if (isOnline()) {
+    await syncData();
+  }
 }
 
 async function deleteCurrent() {
@@ -209,33 +343,116 @@ async function deleteCurrent() {
   }
 
   const id = Number(elements.id.value);
-  const confirmed = window.confirm(`Delete work order #${id}?`);
+  const confirmed = globalThis.confirm(`Delete work order #${id}?`);
   if (!confirmed) {
     return;
   }
 
-  await api(`/api/work-orders/${id}`, { method: "DELETE" });
+  await removeLocalRow(id);
+  await enqueueOperation({
+    operation: "DELETE",
+    id,
+    updatedAt: Date.now()
+  });
+
   clearForm();
-  await reloadAll(`Deleted work order #${id}`);
+  await reloadAll(`Deleted locally work order #${id}`);
+
+  if (isOnline()) {
+    await syncData();
+  }
+}
+
+async function mergeServerRows(serverRows) {
+  if (!Array.isArray(serverRows) || serverRows.length === 0) {
+    return;
+  }
+
+  const pending = await getPendingOperations();
+  const pendingIds = new Set(pending.map((op) => op.id));
+
+  const safeRows = serverRows
+    .filter((row) => !pendingIds.has(row.id))
+    .map((row) => ({
+      ...row,
+      syncStatus: (row.syncStatus || "synced").toLowerCase(),
+      updatedAt: row.updatedAt || Date.now()
+    }));
+
+  await putManyLocalRows(safeRows);
+}
+
+async function pullLatestFromServer() {
+  if (!isOnline()) {
+    throw new Error("Offline mode: cannot fetch server snapshot.");
+  }
+
+  const data = await api("/api/sync/fetch", { method: "POST" });
+  await mergeServerRows(data.rows || []);
+}
+
+async function syncData() {
+  if (!isOnline() || syncInProgress) {
+    return;
+  }
+
+  const pending = await getPendingOperations();
+  if (pending.length === 0) {
+    return;
+  }
+
+  syncInProgress = true;
+  try {
+    const response = await api("/api/sync/pending", {
+      method: "POST",
+      body: JSON.stringify({ operations: pending })
+    });
+
+    const results = response.batch?.results || [];
+
+    for (let i = 0; i < results.length; i += 1) {
+      const result = results[i];
+      const op = pending[i];
+      if (!op) {
+        continue;
+      }
+
+      if (result.status === "APPLIED") {
+        await deletePendingOperation(op.opId);
+      } else if (result.status === "CONFLICT" && result.serverRecord) {
+        await putLocalRow({
+          ...result.serverRecord,
+          syncStatus: "synced"
+        });
+        await deletePendingOperation(op.opId);
+      }
+    }
+
+    await mergeServerRows(response.rows || []);
+    await reloadAll("Sync complete");
+  } finally {
+    syncInProgress = false;
+  }
 }
 
 async function fetchOnline() {
-  await api("/api/sync/fetch", { method: "POST" });
-  await reloadAll("Fetched work orders from API");
+  await pullLatestFromServer();
+  await reloadAll("Pulled latest server snapshot");
 }
 
 async function syncPending() {
-  await api("/api/sync/pending", { method: "POST" });
+  await syncData();
   await reloadAll("Synced pending updates");
 }
 
 async function resetDemo() {
-  const confirmed = window.confirm("Reset all data and seed demo work orders?");
+  const confirmed = globalThis.confirm("Reset all data and seed demo work orders?");
   if (!confirmed) {
     return;
   }
 
   await api("/api/demo/reset", { method: "POST" });
+  await pullLatestFromServer();
   clearForm();
   await reloadAll("Demo data reset complete");
 }
@@ -259,6 +476,19 @@ function wireEvents() {
   document.getElementById("fetch-btn").addEventListener("click", () => runAction(fetchOnline));
   document.getElementById("sync-btn").addEventListener("click", () => runAction(syncPending));
   document.getElementById("reset-btn").addEventListener("click", () => runAction(resetDemo));
+
+  globalThis.addEventListener("online", () => {
+    runAction(async () => {
+      setStatus("Online mode detected. Syncing...");
+      await syncData();
+      await pullLatestFromServer();
+      await reloadAll("Online sync complete");
+    });
+  });
+
+  globalThis.addEventListener("offline", () => {
+    setStatus("Offline mode: using local data only");
+  });
 }
 
 async function runAction(action, successStatus) {
@@ -269,19 +499,28 @@ async function runAction(action, successStatus) {
     }
   } catch (error) {
     setStatus(error.message);
-    window.alert(error.message);
+    globalThis.alert(error.message);
   }
 }
 
 async function bootstrap() {
+  await openLocalDb();
   wireEvents();
   clearForm();
 
-  try {
-    await reloadAll("Loaded TechSync dashboard");
-  } catch (error) {
-    setStatus(error.message);
+  await reloadAll("Loaded local work orders");
+
+  if (isOnline()) {
+    try {
+      await syncData();
+      await pullLatestFromServer();
+      await reloadAll("Loaded TechSync dashboard (online)");
+    } catch (error) {
+      setStatus(`Offline cache ready. Last online sync failed: ${error.message}`);
+    }
+  } else {
+    setStatus("Offline mode: local cache ready");
   }
 }
 
-bootstrap();
+await bootstrap();

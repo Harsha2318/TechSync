@@ -1,6 +1,7 @@
 package com.techsync;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +21,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api")
 public class WorkOrderController {
+
+    private static final String KEY_ERROR = "error";
+    private static final String KEY_METRICS = "metrics";
 
     private final WorkOrderDAO dao = new WorkOrderDAO();
     private final SyncService syncService = new SyncService();
@@ -84,10 +88,26 @@ public class WorkOrderController {
         int id = incoming.getId() > 0 ? incoming.getId() : dao.nextId();
 
         WorkOrder payload = new WorkOrder(id, title, assetId, status, priority, assignedTo);
-        payload.setSyncStatus("pending");
-        dao.upsert(payload);
+        payload.setUpdatedAt(incoming.getUpdatedAt() > 0 ? incoming.getUpdatedAt() : System.currentTimeMillis());
 
-        WorkOrder saved = dao.findById(id);
+        SyncService.SyncOperation operation = new SyncService.SyncOperation();
+        operation.setOperation("UPSERT");
+        operation.setWorkOrder(payload);
+        operation.setUpdatedAt(payload.getUpdatedAt());
+
+        List<SyncService.SyncOperation> operations = new ArrayList<>();
+        operations.add(operation);
+        SyncService.SyncBatchResult result = syncService.applyBatchChanges(operations);
+        SyncService.SyncRecordStatus statusResult = result.getResults().isEmpty() ? null : result.getResults().get(0);
+
+        if (statusResult == null || "FAILED".equals(statusResult.getStatus())) {
+            throw new ApiException("Failed to save work order.", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+        if ("CONFLICT".equals(statusResult.getStatus())) {
+            throw new ApiException("Conflict detected: server has newer data.", HttpStatus.CONFLICT);
+        }
+
+        WorkOrder saved = statusResult.getServerRecord();
         if (saved == null) {
             throw new ApiException("Failed to save work order.", HttpStatus.INTERNAL_SERVER_ERROR);
         }
@@ -107,7 +127,8 @@ public class WorkOrderController {
         }
 
         existing.setStatus(status);
-        existing.setSyncStatus("pending");
+        existing.setUpdatedAt(System.currentTimeMillis());
+        existing.setSyncStatus("synced");
         dao.upsert(existing);
 
         WorkOrder updated = dao.findById(id);
@@ -128,14 +149,29 @@ public class WorkOrderController {
 
     @PostMapping("/sync/fetch")
     public Map<String, Object> fetchOnline() throws SQLException {
-        syncService.fetchAndStore();
-        return metrics();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("rows", syncService.fetchServerSnapshot());
+        result.put(KEY_METRICS, metrics());
+        return result;
     }
 
     @PostMapping("/sync/pending")
-    public Map<String, Object> syncPending() throws SQLException {
-        syncService.syncPendingChanges();
-        return metrics();
+    public Map<String, Object> syncPending(@RequestBody(required = false) SyncBatchRequest request) throws SQLException {
+        if (request == null || request.getOperations() == null || request.getOperations().isEmpty()) {
+            syncService.syncPendingChanges();
+            Map<String, Object> legacy = new LinkedHashMap<>();
+            legacy.put("batch", new SyncService.SyncBatchResult(List.of(), 0, 0, 0).toMap());
+            legacy.put("rows", syncService.fetchServerSnapshot());
+            legacy.put(KEY_METRICS, metrics());
+            return legacy;
+        }
+
+        SyncService.SyncBatchResult batchResult = syncService.applyBatchChanges(request.getOperations());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("batch", batchResult.toMap());
+        result.put("rows", syncService.fetchServerSnapshot());
+        result.put(KEY_METRICS, metrics());
+        return result;
     }
 
     @PostMapping("/demo/reset")
@@ -170,14 +206,14 @@ public class WorkOrderController {
     @org.springframework.web.bind.annotation.ExceptionHandler(ApiException.class)
     public ResponseEntity<Map<String, String>> handleApiException(ApiException ex) {
         Map<String, String> body = new LinkedHashMap<>();
-        body.put("error", ex.getMessage());
+        body.put(KEY_ERROR, ex.getMessage());
         return ResponseEntity.status(ex.status()).body(body);
     }
 
     @org.springframework.web.bind.annotation.ExceptionHandler(SQLException.class)
     public ResponseEntity<Map<String, String>> handleSqlException(SQLException ex) {
         Map<String, String> body = new LinkedHashMap<>();
-        body.put("error", "Database error");
+        body.put(KEY_ERROR, "Database error");
         body.put("detail", ex.getMessage());
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
     }
@@ -185,7 +221,7 @@ public class WorkOrderController {
     @org.springframework.web.bind.annotation.ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleException(Exception ex) {
         Map<String, String> body = new LinkedHashMap<>();
-        body.put("error", "Unexpected server error");
+        body.put(KEY_ERROR, "Unexpected server error");
         body.put("detail", ex.getMessage());
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
     }
@@ -200,6 +236,18 @@ public class WorkOrderController {
 
         private HttpStatus status() {
             return status;
+        }
+    }
+
+    public static final class SyncBatchRequest {
+        private List<SyncService.SyncOperation> operations;
+
+        public List<SyncService.SyncOperation> getOperations() {
+            return operations;
+        }
+
+        public void setOperations(List<SyncService.SyncOperation> operations) {
+            this.operations = operations;
         }
     }
 }

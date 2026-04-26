@@ -15,13 +15,13 @@ import java.util.List;
 public class WorkOrderDAO {
     private static final String SELECT_PREFIX = "SELECT ";
     private static final String BASE_COLUMNS =
-            "id, title, asset_id, status, priority, assigned_to, last_synced, sync_status";
+            "id, title, asset_id, status, priority, assigned_to, updated_at, last_synced, sync_status";
     private static final String FROM_WORK_ORDERS = " FROM work_orders ";
     
     public void upsert(WorkOrder wo) throws SQLException {
         String sql = "INSERT OR REPLACE INTO work_orders "
-                + "(id, title, asset_id, status, priority, assigned_to, sync_status) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+            + "(id, title, asset_id, status, priority, assigned_to, updated_at, sync_status) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         Connection conn = DatabaseHelper.getConnection();
         
         try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -32,7 +32,8 @@ public class WorkOrderDAO {
             pstmt.setString(4, wo.getStatus());
             pstmt.setString(5, wo.getPriority());
             pstmt.setString(6, wo.getAssignedTo());
-            pstmt.setString(7, wo.getSyncStatus());
+            pstmt.setLong(7, wo.getUpdatedAt());
+            pstmt.setString(8, wo.getSyncStatus());
             
             pstmt.executeUpdate();
         }
@@ -213,6 +214,7 @@ public class WorkOrderDAO {
         wo.setStatus(rs.getString("status"));
         wo.setPriority(rs.getString("priority"));
         wo.setAssignedTo(rs.getString("assigned_to"));
+        wo.setUpdatedAt(rs.getLong("updated_at"));
         wo.setSyncStatus(rs.getString("sync_status"));
         wo.setLastSynced(rs.getString("last_synced"));
         return wo;

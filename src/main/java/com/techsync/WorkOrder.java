@@ -29,6 +29,7 @@ public class WorkOrder {
     // Local sync tracking (not from API)
     private String syncStatus = "synced"; // 'pending' or 'synced'
     private String lastSynced;
+    private long updatedAt;
 
     // Constructors
     public WorkOrder() {}
@@ -41,6 +42,7 @@ public class WorkOrder {
         this.status = status;
         this.priority = priority;
         this.assignedTo = assignedTo;
+        this.updatedAt = System.currentTimeMillis();
     }
 
     // Getters & Setters
@@ -67,6 +69,9 @@ public class WorkOrder {
     
     public String getLastSynced() { return lastSynced; }
     public void setLastSynced(String lastSynced) { this.lastSynced = lastSynced; }
+
+    public long getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(long updatedAt) { this.updatedAt = updatedAt; }
 
     @Override
     public String toString() {

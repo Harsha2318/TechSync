@@ -23,6 +23,7 @@ It includes:
 ## Architecture Summary
 
 - Frontend: Static HTML/CSS/JS served by Spring Boot
+- Frontend local data layer: IndexedDB (`workOrders`, `pendingOps`) used for all UI reads/writes
 - Backend: Spring Boot REST controllers + service layer
 - Data: SQLite (`techsync.db`) through DAO pattern
 - External API: `https://jsonplaceholder.typicode.com/todos`
@@ -30,9 +31,9 @@ It includes:
 Core runtime flow:
 
 1. User triggers actions from UI.
-2. Frontend calls `/api/*` endpoints.
-3. Controller delegates to DAO and SyncService.
-4. Data is persisted locally; pending sync is tracked.
+2. Frontend writes/reads IndexedDB first (offline-safe).
+3. Sync manager pushes queued operations to `/api/sync/pending` when online.
+4. Frontend pulls latest server snapshot from `/api/sync/fetch` and merges it locally.
 
 ## Tech Stack
 
@@ -117,6 +118,32 @@ mvn spring-boot:run -Dspring-boot.run.jvmArguments="-Ddb.path=D:/data/techsync.d
 - `POST /api/sync/fetch`
 - `POST /api/sync/pending`
 - `POST /api/demo/reset`
+
+Batch sync payload (`POST /api/sync/pending`):
+
+```json
+{
+  "operations": [
+    {
+      "operation": "UPSERT",
+      "id": 1009,
+      "updatedAt": 1714123000000,
+      "workOrder": {
+        "id": 1009,
+        "title": "Fix valve",
+        "assetId": "ASSET-VALVE-12",
+        "status": "OPEN",
+        "priority": "HIGH",
+        "assignedTo": "Tech-2",
+        "syncStatus": "pending",
+        "updatedAt": 1714123000000
+      }
+    }
+  ]
+}
+```
+
+Conflict rule: Last Write Wins (LWW) using `updatedAt` timestamps.
 
 Example create/update payload (`POST /api/work-orders`):
 
