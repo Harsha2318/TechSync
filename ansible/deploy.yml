@@ -24,20 +24,31 @@
     - name: Pull latest Docker image
       command: docker pull harsha2318/techsync:latest
 
-    - name: Stop existing container (if running)
-      command: docker stop techsync
-      ignore_errors: yes
+    # Fix: Remove ANY existing containers using this image
+    - name: Remove old containers (avoid port conflicts)
+      shell: docker ps -a --filter "ancestor=harsha2318/techsync:latest" -q | xargs -r docker rm -f
 
-    - name: Remove existing container (if exists)
-      command: docker rm techsync
-      ignore_errors: yes
+    # ensure named container is removed
+    - name: Stop existing container (safe)
+      shell: docker stop techsync || true
+
+    - name: Remove existing container (safe)
+      shell: docker rm techsync || true
+
+    - name: Ensure host data directory exists
+      file:
+        path: /home/ec2-user/data
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+        mode: '0755'
 
     - name: Run new container
       command: >
         docker run -d
         --name techsync
         -p 8080:8080
-        -v techsync_data:/data
+        -v /home/ec2-user/data:/data
         --restart unless-stopped
         harsha2318/techsync:latest
 
