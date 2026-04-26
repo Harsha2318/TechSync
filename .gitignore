@@ -1,6 +1,86 @@
 # Build outputs
 /target/
 
+# Maven wrapper
+!.mvn/wrapper/maven-wrapper.jar
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+out/
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+/logs/
+
+# SQLite DB
+*.db
+/data/
+
+# Build tools
+/dist/
+/build/
+
+# Dependency directories
+/node_modules/
+
+# Docker
+*.pid
+*.seed
+*.dumpstream
+*.dump
+*.swp
+
+# Test reports
+/surefire-reports/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python/Ansible (if present)
+__pycache__/
+*.pyc
+.ansible/
+
+# Misc
+*.bak
+*.tmp
+*.old
+
+# Ignore generated sources
+/target/generated-sources/
+/target/generated-test-sources/
+
+# Ignore local infra state
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Ignore coverage
+/coverage/
+*.lcov
+
+# Ignore service worker cache (if any)
+/workbox-*
+
+# Ignore user secrets
+secrets.*
+
 # Local runtime data
 techsync.db
 *.db
