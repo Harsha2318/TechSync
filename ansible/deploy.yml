@@ -1,0 +1,84 @@
+- name: Deploy TechSync Container
+  hosts: servers
+  become: true
+
+  tasks:
+
+    - name: Install Docker
+      dnf:
+        name: docker
+        state: present
+
+    - name: Start Docker
+      service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Add ec2-user to docker group
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes
+
+    - name: Pull latest Docker image
+      command: docker pull harsha2318/techsync:latest
+
+    - name: Stop existing container (if running)
+      command: docker stop techsync
+      ignore_errors: yes
+
+    - name: Remove existing container (if exists)
+      command: docker rm techsync
+      ignore_errors: yes
+
+    - name: Run new container
+      command: >
+        docker run -d
+        --name techsync
+        -p 8080:8080
+        -v techsync_data:/data
+        --restart unless-stopped
+        harsha2318/techsync:latest
+
+    - name: Install Nginx
+      dnf:
+        name: nginx
+        state: present
+
+    - name: Configure Nginx reverse proxy
+      copy:
+        dest: /etc/nginx/nginx.conf
+        content: |
+          events {}
+          http {
+              server {
+                  listen 80;
+                  server_name _;
+
+                  location / {
+                      proxy_pass http://localhost:8080;
+                      proxy_set_header Host $host;
+                      proxy_set_header X-Real-IP $remote_addr;
+                  }
+              }
+          }
+
+    - name: Start Nginx
+      service:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted
+
+    - name: Verify app health
+      command: curl http://localhost:8080/api/health
+      register: health_output
+
+    - name: Show health output
+      debug:
+        var: health_output.stdout

@@ -16,6 +16,7 @@ const elements = {
   tableCount: document.getElementById("table-count"),
   tableBody: document.querySelector("#orders-table tbody"),
   statusMessage: document.getElementById("status-message"),
+  networkBadge: document.getElementById("network-badge"),
   detailsBox: document.getElementById("details-box"),
   filterStatus: document.getElementById("filter-status"),
   filterPriority: document.getElementById("filter-priority"),
@@ -33,15 +34,60 @@ function setStatus(message) {
   elements.statusMessage.textContent = message;
 }
 
+function setConnectivity(mode, detail = "") {
+  if (!elements.networkBadge) {
+    return;
+  }
+
+  elements.networkBadge.classList.remove("is-online", "is-offline", "is-degraded");
+
+  if (mode === "online") {
+    elements.networkBadge.classList.add("is-online");
+    elements.networkBadge.textContent = "Online";
+    return;
+  }
+
+  if (mode === "degraded") {
+    elements.networkBadge.classList.add("is-degraded");
+    elements.networkBadge.textContent = detail ? `Server unreachable: ${detail}` : "Server unreachable";
+    return;
+  }
+
+  elements.networkBadge.classList.add("is-offline");
+  elements.networkBadge.textContent = "Offline";
+}
+
 function isOnline() {
   return navigator.onLine;
 }
 
+function isReachabilityError(error) {
+  const message = (error?.message || "").toLowerCase();
+  return message.includes("unable to reach server") || message.includes("failed to fetch") || message.includes("networkerror");
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+
+  try {
+    await navigator.serviceWorker.register("/sw.js");
+  } catch (error) {
+    setStatus(`Service worker registration failed; offline shell cache disabled (${error.message})`);
+  }
+}
+
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...options
+    });
+  } catch (error) {
+    throw new Error(`Unable to reach server. Local data is still available. (${error.message})`);
+  }
 
   if (!response.ok) {
     let message = `Request failed: ${response.status}`;
@@ -49,6 +95,11 @@ async function api(path, options = {}) {
     if (contentType.includes("application/json")) {
       const body = await response.json();
       message = body.error || body.detail || message;
+    } else {
+      const text = await response.text();
+      if (text && text.trim().length > 0) {
+        message = text.trim();
+      }
     }
     throw new Error(message);
   }
@@ -333,7 +384,7 @@ async function saveCurrent() {
   await reloadAll(`Saved locally work order #${localRecord.id}`);
 
   if (isOnline()) {
-    await syncData();
+    await syncData({ silentNetworkFailure: true });
   }
 }
 
@@ -359,7 +410,7 @@ async function deleteCurrent() {
   await reloadAll(`Deleted locally work order #${id}`);
 
   if (isOnline()) {
-    await syncData();
+    await syncData({ silentNetworkFailure: true });
   }
 }
 
@@ -387,11 +438,22 @@ async function pullLatestFromServer() {
     throw new Error("Offline mode: cannot fetch server snapshot.");
   }
 
-  const data = await api("/api/sync/fetch", { method: "POST" });
-  await mergeServerRows(data.rows || []);
+  try {
+    const data = await api("/api/sync/fetch", { method: "POST" });
+    await mergeServerRows(data.rows || []);
+    setConnectivity("online");
+  } catch (error) {
+    if (isReachabilityError(error)) {
+      setConnectivity("degraded", "cached mode");
+      throw new Error("Server unreachable. Working from local cache.");
+    }
+    throw error;
+  }
 }
 
-async function syncData() {
+async function syncData(options = {}) {
+  const { silentNetworkFailure = false } = options;
+
   if (!isOnline() || syncInProgress) {
     return;
   }
@@ -429,7 +491,18 @@ async function syncData() {
     }
 
     await mergeServerRows(response.rows || []);
+    setConnectivity("online");
     await reloadAll("Sync complete");
+  } catch (error) {
+    if (isReachabilityError(error)) {
+      setConnectivity("degraded", "cached mode");
+      if (silentNetworkFailure) {
+        setStatus("Server unreachable. Changes kept locally and queued.");
+        return;
+      }
+      throw new Error("Server unreachable. Changes are safely queued for later sync.");
+    }
+    throw error;
   } finally {
     syncInProgress = false;
   }
@@ -479,14 +552,16 @@ function wireEvents() {
 
   globalThis.addEventListener("online", () => {
     runAction(async () => {
+      setConnectivity("online");
       setStatus("Online mode detected. Syncing...");
-      await syncData();
+      await syncData({ silentNetworkFailure: true });
       await pullLatestFromServer();
       await reloadAll("Online sync complete");
     });
   });
 
   globalThis.addEventListener("offline", () => {
+    setConnectivity("offline");
     setStatus("Offline mode: using local data only");
   });
 }
@@ -504,18 +579,28 @@ async function runAction(action, successStatus) {
 }
 
 async function bootstrap() {
+  await registerServiceWorker();
   await openLocalDb();
   wireEvents();
   clearForm();
+
+  if (isOnline()) {
+    setConnectivity("online");
+  } else {
+    setConnectivity("offline");
+  }
 
   await reloadAll("Loaded local work orders");
 
   if (isOnline()) {
     try {
-      await syncData();
+      await syncData({ silentNetworkFailure: true });
       await pullLatestFromServer();
       await reloadAll("Loaded TechSync dashboard (online)");
     } catch (error) {
+      if (isReachabilityError(error)) {
+        setConnectivity("degraded", "cached mode");
+      }
       setStatus(`Offline cache ready. Last online sync failed: ${error.message}`);
     }
   } else {
