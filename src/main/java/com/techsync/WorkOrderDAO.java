@@ -39,7 +39,7 @@ public class WorkOrderDAO {
     }
     
     /**
-     * Offline filtering - mirrors MDK's $filter capability
+     * Offline filtering for status and priority.
      */
     public List<WorkOrder> findByStatusAndPriority(String status, String priority) 
             throws SQLException {

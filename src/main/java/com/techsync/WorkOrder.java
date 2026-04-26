@@ -3,7 +3,7 @@ package com.techsync;
 import com.google.gson.annotations.SerializedName;
 
 /**
- * POJO representing a Work Order from SAP Asset Manager / Mock API
+ * POJO representing a Work Order from a mock API
  * Demonstrates: JSON ↔ Java mapping, data encapsulation
  */
 public class WorkOrder {

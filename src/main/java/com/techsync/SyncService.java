@@ -104,7 +104,7 @@ public class SyncService {
 
     private void syncSingleWorkOrder(WorkOrder wo) {
         // Simulate PUT request to update server
-        // In real MDK: use SAP OData client with proper auth
+        // In production: use an authenticated OData client
         System.out.println("   → Syncing WO#" + wo.getId());
 
         try {
